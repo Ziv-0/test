@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-#debug 两worker的参数完全相同问题,两者公用了一片内存
 #hooker 机制，让所有训练好后触发hooker
 """
 Created on Mon Oct  5 18:51:23 2020
@@ -8,6 +7,7 @@ Created on Mon Oct  5 18:51:23 2020
 """
 import torch
 import torchvision
+import threading
 
 
 
@@ -31,9 +31,34 @@ class Worker():
  
 class Server():
     def __init__(self):
-        self.worker_list = []
         pass
-
+    
+def worker_train(ni,worker,nepoch,batch_size):
+    for nth_epoch in range(nepoch):
+        for i,sampledata in enumerate(worker.dataloader):
+                labels = sampledata[1].to(device)
+                pilimage = sampledata[0].to(device)
+                a = pilimage.reshape(batch_size,784)
+                predict = worker.model(a)
+                # labels = torch.zeros(batch_size, class_num).scatter_(1, labels.unsqueeze(1), 1)
+                lossfunc = torch.nn.CrossEntropyLoss()
+                loss = lossfunc(predict,labels)
+                # print(loss)
+                worker.optim.zero_grad()
+                loss.backward()
+                worker.optim.step()
+        num_right = torch.IntTensor([0]).to(device)
+        with torch.no_grad():
+            for i,sampledata in enumerate(test_dataloader):
+                labels = sampledata[1].to(device)
+                pilimage = sampledata[0].to(device)
+                a = pilimage.reshape(batch_size,784)
+                predict = worker_list[k].model(a)
+                pre = predict.max(1)[1]
+                num_right += sum(torch.eq(pre,labels))
+        acc = num_right.float()/(i*batch_size)
+        print('worker: %d epoch:%d acc:%f' % (ni,nth_epoch,acc))
+        
 def para_aggre(worker_list,para_key):
     temp_tensor = worker_list[0].model.state_dict()[para_key]
     for i in range(1,len(worker_list)):
@@ -60,55 +85,56 @@ for i in range(worker_N):
     worker_list[i].dataloader = torch.utils.data.DataLoader(dataset_list[i],batch_size= batch_size,shuffle=True,num_workers=0)
     worker_list[i].model = Fcnmodel(784,10,10,10).to(device)
     worker_list[i].optim = torch.optim.SGD(worker_list[i].model.parameters(), lr = 0.01, momentum=0)
-    
 #开始训练
 niter = 10000
-for agi in range(len(worker_list)):#模型分发
-    with torch.no_grad():
-        for para_key in  server.model.state_dict().keys():
-            current_para = eval('worker_list[agi].model.'+para_key)
-            current_para.data.copy_(eval('server.model.'+para_key+'.data'))
-pass
+nepoch = 5
+
+
+
+
+# threads = []
+# t1 = threading.Thread(target=music,args=(u'爱情买卖',))
+# threads.append(t1)
+# t2 = threading.Thread(target=move,args=(u'阿凡达',))
+# threads.append(t2)
+
+# for i_iter in range(niter):
+# #train woker i
+#     for k in range(len(worker_list)):
+#         worker_train(k, worker_list[k], nepoch, batch_size)
+# if __name__ == '__main__':
+#     for t in threads:
+#         t.setDaemon(True)
+#         t.start()
+#     for t in threads:
+#         t.join()
+# print("all over")
+
 for i_iter in range(niter):
 #train woker i
+    threads = []
     for k in range(len(worker_list)):
-        nepoch = 7
-        for j in range(nepoch):
-            for i,sampledata in enumerate(worker_list[k].dataloader):
-                labels = sampledata[1].to(device)
-                pilimage = sampledata[0].to(device)
-                a = pilimage.reshape(batch_size,784)
-                predict = worker_list[k].model(a)
-                # labels = torch.zeros(batch_size, class_num).scatter_(1, labels.unsqueeze(1), 1)
-                lossfunc = torch.nn.CrossEntropyLoss()
-                loss = lossfunc(predict,labels)
-                # print(loss)
-                worker_list[k].optim.zero_grad()
-                loss.backward()
-                worker_list[k].optim.step()
-            num_right = torch.IntTensor([0]).to(device)
-            with torch.no_grad():
-                for i,sampledata in enumerate(test_dataloader):
-                    labels = sampledata[1].to(device)
-                    pilimage = sampledata[0].to(device)
-                    a = pilimage.reshape(batch_size,784)
-                    predict = worker_list[k].model(a)
-                    pre = predict.max(1)[1]
-                    num_right += sum(torch.eq(pre,labels))
-            acc = num_right.float()/(i*batch_size)
-            print('worker: %d epoch:%d acc:%f' % (k,j,acc))
+        t = threading.Thread(target= worker_train,args=(k, worker_list[k], nepoch, batch_size))
+    #     # worker_train(k, worker_list[k], nepoch, batch_size)
+    #     threads.append(t)
+    # for t in threads:
+    #     t.start()
+    # for t in threads:
+    #     t.join()
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
+
+    
+   
+    
+   
 #server参数整合
     with torch.no_grad():
         for para_key in  server.model.state_dict().keys():
-            eval('server.model'+'.'+para_key).set_(para_aggre(worker_list,para_key))
-             # model.conv1.weight.set_((alice_model.conv1.weight+ bob_model.conv1.weight)/2.)  
-#              models = ['alice_model', 'bob_model', 'model']
-# with torch.no_grad():
-#     for param_name in models:
-#         eval(models[2]+'.'+ param_name).set_((eval(models[2]+'.'+ param_name) +\
-#                                     eval(models[2]+'.'+ param_name))/2.)
-            # server.model.state_dict()[para_key] = para_aggre(worker_list,para_key)
-            
+            eval('server.model'+'.'+para_key).set_(para_aggre(worker_list,para_key))    
+#server准确率计算
     num_right = torch.IntTensor([0]).to(device)
     with torch.no_grad():
         for i,sampledata in enumerate(test_dataloader):
@@ -120,6 +146,7 @@ for i_iter in range(niter):
             num_right += sum(torch.eq(pre,labels))
     acc = num_right.float()/(i*batch_size)
     print('niter: %d server test acc:%f' % (i_iter,acc))
+#server参数分发
     for agi in range(len(worker_list)):
         with torch.no_grad():
             for para_key in  server.model.state_dict().keys():
@@ -128,22 +155,3 @@ for i_iter in range(niter):
     pass
     
                 
-            
-# from multiprocessing.dummy import Pool as ThreadPool
-# for i in range(worker_N):
-#     pool = ThreadPool(worker_N) 
-#     pool.map(worker_train,woker_list)
-#     server.get_worker_updates()
-#     server.para_update()
-#     server.send_paras2worker()
-#     pool.map(woker_get_globalmodel,woker_list)
-                
-            
-# from multiprocessing.dummy import Pool as ThreadPool
-# for i in range(worker_N):
-#     pool = ThreadPool(worker_N) 
-#     pool.map(worker_train,woker_list)
-#     server.get_worker_updates()
-#     server.para_update()
-#     server.send_paras2worker()
-#     pool.map(woker_get_globalmodel,woker_list)
