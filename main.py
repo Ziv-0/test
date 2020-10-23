@@ -88,52 +88,21 @@ for i in range(worker_N):
 #开始训练
 niter = 10000
 nepoch = 5
-
-
-
-
-# threads = []
-# t1 = threading.Thread(target=music,args=(u'爱情买卖',))
-# threads.append(t1)
-# t2 = threading.Thread(target=move,args=(u'阿凡达',))
-# threads.append(t2)
-
-# for i_iter in range(niter):
-# #train woker i
-#     for k in range(len(worker_list)):
-#         worker_train(k, worker_list[k], nepoch, batch_size)
-# if __name__ == '__main__':
-#     for t in threads:
-#         t.setDaemon(True)
-#         t.start()
-#     for t in threads:
-#         t.join()
-# print("all over")
-
 for i_iter in range(niter):
 #train woker i
     threads = []
     for k in range(len(worker_list)):
         t = threading.Thread(target= worker_train,args=(k, worker_list[k], nepoch, batch_size))
-    #     # worker_train(k, worker_list[k], nepoch, batch_size)
-    #     threads.append(t)
-    # for t in threads:
-    #     t.start()
-    # for t in threads:
-    #     t.join()
         threads.append(t)
         t.start()
     for t in threads:
         t.join()
 
-    
-   
-    
-   
 #server参数整合
     with torch.no_grad():
         for para_key in  server.model.state_dict().keys():
             eval('server.model'+'.'+para_key).set_(para_aggre(worker_list,para_key))    
+            
 #server准确率计算
     num_right = torch.IntTensor([0]).to(device)
     with torch.no_grad():
@@ -146,6 +115,7 @@ for i_iter in range(niter):
             num_right += sum(torch.eq(pre,labels))
     acc = num_right.float()/(i*batch_size)
     print('niter: %d server test acc:%f' % (i_iter,acc))
+    
 #server参数分发
     for agi in range(len(worker_list)):
         with torch.no_grad():
